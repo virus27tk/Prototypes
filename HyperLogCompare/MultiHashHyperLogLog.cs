@@ -1,22 +1,22 @@
 namespace HyperLogCompare;
 
 /// <summary>
-/// Runs several independent Flajolet-Martin sketches (each with its own seeded hash
-/// function) over the same input and averages their estimates to reduce variance.
+/// Runs several independent HyperLogLog sketches (each with its own seeded hash function)
+/// over the same input and averages their estimates to reduce variance.
 /// </summary>
-public class MultiHashFlajoletMartin : ICardinalityEstimator
+public class MultiHashHyperLogLog : ICardinalityEstimator
 {
-    private readonly List<FlajoletMartinSketch> _sketches;
+    private readonly List<HyperLogLogSketch> _sketches;
 
     public int HashFunctionCount { get; }
 
-    public MultiHashFlajoletMartin(int hashFunctionCount)
+    public MultiHashHyperLogLog(int hashFunctionCount, int precision)
     {
         HashFunctionCount = hashFunctionCount;
-        _sketches = new List<FlajoletMartinSketch>();
+        _sketches = new List<HyperLogLogSketch>();
         for (int seed = 0; seed < hashFunctionCount; seed++)
         {
-            _sketches.Add(new FlajoletMartinSketch(seed));
+            _sketches.Add(new HyperLogLogSketch(precision, seed));
         }
     }
 
