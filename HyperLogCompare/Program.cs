@@ -1,5 +1,7 @@
 using HyperLogCompare;
+
 int[] hashFunctionCounts = { 1, 2, 3 };
+const int precision = 10; // 2^10 = 1024 registers per sketch, used only by the bucket-based HyperLogLog
 
 string[] files = Directory.GetFiles(AppContext.BaseDirectory, "sample_*_words.txt")
     .OrderBy(f => new FileInfo(f).Length)
@@ -11,42 +13,54 @@ if (files.Length == 0)
     return;
 }
 
-var columns = new List<string> { "File", "TotalWords", "ExactUnique" };
-foreach (int h in hashFunctionCounts)
+var fileStats = files.Select(file =>
 {
-    columns.Add($"HLL_{h}hash");
-    columns.Add($"Error%_{h}hash");
-}
+    string text = File.ReadAllText(file);
+    List<string> words = Tokenizer.Tokenize(text);
+    return (
+        FileName: Path.GetFileName(file),
+        Words: words,
+        ExactUnique: ExactWordCounter.CountUnique(words)
+    );
+}).ToList();
 
 string FormatRow(IReadOnlyList<string> values) =>
     $"{values[0],-24}" + string.Join("", values.Skip(1).Select(v => $"{v,-16}"));
 
-Console.WriteLine(FormatRow(columns));
-
-var csvLines = new List<string> { string.Join(",", columns) };
-
-foreach (var file in files)
+void RunTable(string title, string columnPrefix, Func<int, ICardinalityEstimator> createEstimator)
 {
-    var text = File.ReadAllText(file);
-    var words = Tokenizer.Tokenize(text);
-    var exactUnique = ExactWordCounter.CountUnique(words);
-
-    var fileName = Path.GetFileName(file);
-    var rowValues = new List<string> { fileName, words.Count.ToString(), exactUnique.ToString() };
-    foreach (var hashFunctionCount in hashFunctionCounts)
+    var columns = new List<string> { "File", "TotalWords", "ExactUnique" };
+    foreach (int h in hashFunctionCounts)
     {
-        var hll = new MultiHashFlajoletMartin(hashFunctionCount);
-        foreach (var word in words)
-        {
-            hll.Add(word);
-        }
-
-        var estimate = hll.Estimate();
-        var errorPercent = exactUnique == 0 ? 0 : Math.Abs(estimate - exactUnique) / exactUnique * 100;
-        rowValues.Add(estimate.ToString("F1"));
-        rowValues.Add(errorPercent.ToString("F2"));
+        columns.Add($"{columnPrefix}_{h}hash");
+        columns.Add($"Error%_{h}hash");
     }
 
-    Console.WriteLine(FormatRow(rowValues));
+    Console.WriteLine(title);
+    Console.WriteLine(FormatRow(columns));
+
+    foreach (var (fileName, words, exactUnique) in fileStats)
+    {
+        var rowValues = new List<string> { fileName, words.Count.ToString(), exactUnique.ToString() };
+        foreach (int hashFunctionCount in hashFunctionCounts)
+        {
+            ICardinalityEstimator estimator = createEstimator(hashFunctionCount);
+            foreach (string word in words)
+            {
+                estimator.Add(word);
+            }
+
+            double estimate = estimator.Estimate();
+            double errorPercent = exactUnique == 0 ? 0 : Math.Abs(estimate - exactUnique) / exactUnique * 100;
+            rowValues.Add(estimate.ToString("F1"));
+            rowValues.Add(errorPercent.ToString("F2"));
+        }
+
+        Console.WriteLine(FormatRow(rowValues));
+    }
+
+    Console.WriteLine();
 }
-Console.WriteLine();
+
+RunTable("Flajolet-Martin (bitmap, first-set-bit)", "FM", h => new MultiHashFlajoletMartin(h));
+RunTable("HyperLogLog (bucket / register max-rank)", "HLL", h => new MultiHashHyperLogLog(h, precision));
